@@ -44,14 +44,42 @@ def _redact(text: str) -> str:
     return text
 
 
+def _redact_exception_text(exc_info) -> str:
+    # logging.Formatter appends record.exc_info AFTER record.msg; a filter
+    # that only rewrites msg would leave a device identity echoed in an
+    # exception message or traceback in the persistent log.
+    import traceback
+    try:
+        if exc_info is True:
+            import sys
+            exc_info = sys.exc_info()
+        if not exc_info or exc_info == (None, None, None):
+            return ""
+        text = "".join(traceback.format_exception(*exc_info))
+    except Exception:  # pragma: no cover - never let logging break the app
+        return _REDACTED
+    return _redact(text)
+
+
 class _PrivacyFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         try:
             record.msg = _redact(str(record.getMessage()))
             record.args = ()
+            # Sanitize traceback/stack too, otherwise logger.exception()
+            # leaks the raw identifier through the appended traceback.
+            if record.exc_info:
+                record.exc_text = _redact_exception_text(record.exc_info)
+                record.exc_info = None
+            if record.exc_text:
+                record.exc_text = _redact(record.exc_text)
+            if record.stack_info:
+                record.stack_info = _redact(record.stack_info)
         except Exception:  # pragma: no cover - never let logging break the app
             record.msg = _REDACTED
             record.args = ()
+            record.exc_info = None
+            record.exc_text = _REDACTED
         return True
 
 
